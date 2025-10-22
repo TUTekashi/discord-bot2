@@ -4,7 +4,6 @@ const path = require("path");
 
 const filePath = path.join(__dirname, "../data/userLanguages.json");
 
-// ✅ Ensure file exists and is valid JSON
 function loadUserData() {
   try {
     if (!fs.existsSync(filePath)) {
@@ -22,7 +21,7 @@ function loadUserData() {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('setlanguage')
-    .setDescription('Set your preferred language and translation mode')
+    .setDescription('Set your preferred language for translations')
     .addStringOption(option =>
       option.setName('language')
         .setDescription('Your preferred language')
@@ -54,49 +53,30 @@ module.exports = {
           { name: 'Turkish', value: 'TR' },
           { name: 'Ukrainian', value: 'UK' }
         )
-    )
-    .addStringOption(option =>
-      option.setName('mode')
-        .setDescription('Translation mode (default: reaction)')
-        .setRequired(false)
-        .addChoices(
-          { name: 'Reaction - Click 🌍 reaction to translate', value: 'button' },
-          { name: 'Auto - Automatically translate all messages', value: 'auto' }
-        )
     ),
 
   async execute(interaction) {
     try {
-      await interaction.deferReply({ flags: 64 });
+      await interaction.deferReply({ ephemeral: true });
 
       const langCode = interaction.options.getString('language');
-      const mode = interaction.options.getString('mode') || 'button';
       const userId = interaction.user.id;
       const users = loadUserData();
       
-      users[userId] = {
-        lang: langCode,
-        mode: mode
-      };
+      users[userId] = langCode;
 
       fs.writeFileSync(filePath, JSON.stringify(users, null, 2));
 
-      const modeText = mode === 'auto' ? '(Auto-translate enabled - you will receive DMs)' : '(Click 🌍 reaction to translate)';
       await interaction.editReply({
-        content: `✅ Your language has been set to **${langCode}** ${modeText}`,
+        content: `✅ Your language has been set to **${langCode}**\n\nYou can now right-click any message and select **"Translate Message"** to see translations in your language.`,
       });
     } catch (err) {
       console.error('Error in setlanguage:', err);
+      const errorMsg = { content: '❌ Error executing command.', ephemeral: true };
       if (interaction.deferred || interaction.replied) {
-        await interaction.followUp({
-          content: '❌ Error executing command.',
-          flags: 64,
-        });
+        await interaction.followUp(errorMsg).catch(() => {});
       } else {
-        await interaction.reply({
-          content: '❌ Error executing command.',
-          flags: 64,
-        });
+        await interaction.reply(errorMsg).catch(() => {});
       }
     }
   },

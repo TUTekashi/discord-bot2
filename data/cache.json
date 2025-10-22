@@ -6,5 +6,13 @@
   "hola amigo::EN-US": {
     "text": "hello friend",
     "timestamp": 1761147299417
+  },
+  "Der schnelle braune Fuchs springt über den faulen Hund::BG": {
+    "text": "Бързата кафява лисица прескача мързеливото куче",
+    "timestamp": 1761148250180
+  },
+  "./setlanguage code:::BG": {
+    "text": "./setlanguage код:",
+    "timestamp": 1761148264573
   }
 }

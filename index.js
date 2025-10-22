@@ -2,8 +2,10 @@ require("dotenv").config();
 const {
   Client,
   GatewayIntentBits,
-  Partials,
   Collection,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
 } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
@@ -14,9 +16,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMessageReactions,
   ],
-  partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
 client.commands = new Collection();
@@ -32,35 +32,11 @@ if (fs.existsSync(commandsPath)) {
   }
 }
 
-client.on("interactionCreate", async (interaction) => {
-  if (interaction.isChatInputCommand()) {
-    const command = client.commands.get(interaction.commandName);
-    if (!command) return;
-    try {
-      await command.execute(interaction);
-      reloadTranslationChannels();
-    } catch (err) {
-      console.error(err);
-      await interaction.reply({ content: "❌ Error executing command.", flags: 64 });
-    }
-  }
-});
-
-const userFilePath = path.join(__dirname, "./data/userLanguages.json");
 const deeplTranslator = new deepl.Translator(process.env.DEEPL_KEY);
-
+const userFilePath = path.join(__dirname, "./data/userLanguages.json");
+const channelDataPath = path.join(__dirname, "./data/translateChannel.json");
 const cacheFilePath = path.join(__dirname, "./data/cache.json");
-let translationCache = {};
 if (!fs.existsSync(cacheFilePath)) fs.writeFileSync(cacheFilePath, "{}");
-translationCache = JSON.parse(fs.readFileSync(cacheFilePath, "utf8"));
-
-setInterval(() => {
-  const now = Date.now();
-  for (const key in translationCache) {
-    if (now - translationCache[key].timestamp > 6 * 60 * 60 * 1000) delete translationCache[key];
-  }
-  fs.writeFileSync(cacheFilePath, JSON.stringify(translationCache, null, 2));
-}, 6 * 60 * 60 * 1000);
 
 function loadUserData() {
   if (!fs.existsSync(userFilePath)) fs.writeFileSync(userFilePath, "{}");
@@ -73,12 +49,9 @@ function getUserPref(userId) {
   const raw = users[userId];
   if (!raw) return null;
   if (typeof raw === "string") {
-    return { lang: normalizeLang(raw), mode: "button" };
+    return normalizeLang(raw);
   }
-  return { 
-    lang: normalizeLang(raw.lang || ""), 
-    mode: raw.mode || "button" 
-  };
+  return normalizeLang(raw.lang || raw);
 }
 
 function normalizeLang(lang) {
@@ -92,8 +65,7 @@ function normalizeLang(lang) {
 
 function getBaseLang(lang) {
   if (!lang) return "";
-  const base = lang.toUpperCase().split("-")[0];
-  return base;
+  return lang.toUpperCase().split("-")[0];
 }
 
 function languagesMatch(lang1, lang2) {
@@ -103,188 +75,167 @@ function languagesMatch(lang1, lang2) {
   return base1 === base2;
 }
 
-const channelDataPath = path.join(__dirname, "./data/translateChannel.json");
-if (!fs.existsSync(channelDataPath)) {
-  fs.writeFileSync(channelDataPath, '{"channelIds":[]}');
-}
-
-let allowedChannelIds = [];
-function reloadTranslationChannels() {
+function isAllowedChannel(channelId) {
+  if (!fs.existsSync(channelDataPath)) return false;
   try {
     const data = JSON.parse(fs.readFileSync(channelDataPath, "utf8"));
-    if (data.channelId) {
-      allowedChannelIds = [data.channelId];
-    } else if (data.channelIds) {
-      allowedChannelIds = data.channelIds;
-    }
-  } catch (err) {
-    console.error("Error loading translation channels:", err);
-    allowedChannelIds = [];
+    if (data.channelId) return data.channelId === channelId;
+    if (data.channelIds) return data.channelIds.includes(channelId);
+    return false;
+  } catch {
+    return false;
   }
 }
-reloadTranslationChannels();
 
-const reactionsAdded = new Set();
+function loadTranslationCache() {
+  if (!fs.existsSync(cacheFilePath)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(cacheFilePath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveTranslationCache(cache) {
+  fs.writeFileSync(cacheFilePath, JSON.stringify(cache, null, 2));
+}
 
 client.on("messageCreate", async (message) => {
   if (message.author?.bot) return;
   if (!message.content) return;
-
-  if (!allowedChannelIds.includes(message.channel.id)) return;
-
-  if (reactionsAdded.has(message.id)) return;
+  if (!isAllowedChannel(message.channel.id)) return;
 
   try {
-    const users = loadUserData();
-    const userIds = Object.keys(users);
-    if (!userIds.length) return;
+    const button = new ButtonBuilder()
+      .setCustomId(`translate_${message.id}`)
+      .setLabel("🌍 Translate")
+      .setStyle(ButtonStyle.Primary);
 
-    const detection = await deeplTranslator.translateText(message.content, null, "EN-US");
-    const detectedLang = (detection.detectedSourceLang || "EN").toUpperCase();
+    const row = new ActionRowBuilder().addComponents(button);
 
-    const autoTranslateUsers = [];
-    const reactionModeUsers = [];
-
-    for (const id of userIds) {
-      const pref = getUserPref(id);
-      if (!pref?.lang || languagesMatch(pref.lang, detectedLang)) continue;
-      
-      if (pref.mode === "auto") {
-        autoTranslateUsers.push({ userId: id, pref });
-      } else {
-        reactionModeUsers.push({ userId: id, pref });
-      }
-    }
-
-    if (autoTranslateUsers.length > 0) {
-      for (const { userId, pref } of autoTranslateUsers) {
-        try {
-          const cacheKey = `${message.content}::${pref.lang}`;
-          let translatedText = translationCache[cacheKey]?.text;
-
-          if (!translatedText) {
-            const result = await deeplTranslator.translateText(
-              message.content,
-              detectedLang,
-              pref.lang
-            );
-            translatedText = result.text;
-            translationCache[cacheKey] = { text: translatedText, timestamp: Date.now() };
-            fs.writeFileSync(cacheFilePath, JSON.stringify(translationCache, null, 2));
-          }
-
-          const user = await client.users.fetch(userId);
-          await user.send(
-            `🌍 **Auto-Translation** from ${detectedLang} → ${pref.lang}\n` +
-            `📍 ${message.channel.name} - ${message.author.tag}:\n\n` +
-            `**Original:** ${message.content}\n\n` +
-            `**Translation:** ${translatedText}`
-          ).catch(() => {
-            console.log(`Cannot DM user ${userId} (DMs disabled or not accessible)`);
-          });
-        } catch (err) {
-          handleDeeplError(err, `Auto-translate for user ${userId}`);
-        }
-      }
-    }
-
-    if (reactionModeUsers.length > 0) {
-      await message.react("🌍");
-      reactionsAdded.add(message.id);
-    }
-  } catch (err) {
-    handleDeeplError(err, "Reaction add");
-  }
-});
-
-client.on("messageReactionAdd", async (reaction, user) => {
-  if (user.bot) return;
-  
-  if (reaction.partial) {
-    try {
-      await reaction.fetch();
-    } catch (error) {
-      console.error('Error fetching reaction:', error);
-      return;
-    }
-  }
-
-  if (reaction.emoji.name !== "🌍") return;
-
-  const message = reaction.message;
-  if (!message.content) return;
-
-  if (!allowedChannelIds.includes(message.channel.id)) return;
-
-  try {
-    const pref = getUserPref(user.id);
-    if (!pref?.lang) {
-      await user.send("⚠️ Set your language first with `/setlanguage`.").catch(() => {
-        console.log(`Cannot DM user ${user.id}`);
-      });
-      return;
-    }
-
-    const detection = await deeplTranslator.translateText(message.content, null, "EN-US");
-    const detectedLang = (detection.detectedSourceLang || "EN").toUpperCase();
-
-    if (languagesMatch(pref.lang, detectedLang)) {
-      await user.send(`✅ Message is already in ${detectedLang}. No translation needed.`).catch(() => {
-        console.log(`Cannot DM user ${user.id}`);
-      });
-      return;
-    }
-
-    const cacheKey = `${message.content}::${pref.lang}`;
-    let translatedText = translationCache[cacheKey]?.text;
-
-    if (!translatedText) {
-      const result = await deeplTranslator.translateText(
-        message.content,
-        detectedLang,
-        pref.lang
-      );
-      translatedText = result.text;
-      translationCache[cacheKey] = { text: translatedText, timestamp: Date.now() };
-      fs.writeFileSync(cacheFilePath, JSON.stringify(translationCache, null, 2));
-    }
-
-    await user.send(
-      `🌍 **Translation** (${detectedLang} → ${pref.lang})\n` +
-      `📍 ${message.channel.name} - ${message.author.tag}:\n\n` +
-      `**Original:** ${message.content}\n\n` +
-      `**Translation:** ${translatedText}`
-    ).catch(() => {
-      console.log(`Cannot DM user ${user.id}`);
+    await message.channel.send({
+      content: "Click to translate this message to your language:",
+      components: [row],
     });
   } catch (err) {
-    handleDeeplError(err, "Reaction translation");
+    console.error("Error adding translate button:", err);
   }
 });
 
-function handleDeeplError(err, context, interaction = null) {
-  console.error(`${context} error:`, err);
-  
-  let userMessage = "❌ Translation error occurred.";
-  
-  if (err.response?.status === 456) {
-    userMessage = "⚠️ DeepL quota exceeded. Please try again later.";
-  } else if (err.response?.status === 429) {
-    userMessage = "⏳ Too many translation requests. Please wait a moment.";
-  } else if (err.code === "ENOTFOUND" || err.code === "ETIMEDOUT") {
-    userMessage = "🌐 Cannot reach translation service. Please try again.";
-  } else if (err.message?.includes("Unknown language")) {
-    userMessage = "❌ Unsupported language detected. Please check your settings.";
-  }
+client.on("interactionCreate", async (interaction) => {
+  if (interaction.isChatInputCommand() || interaction.isMessageContextMenuCommand()) {
+    const command = client.commands.get(interaction.commandName);
+    if (!command) return;
+    try {
+      await command.execute(interaction);
+    } catch (err) {
+      console.error(err);
+      const errorMsg = { content: "❌ Error executing command.", ephemeral: true };
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp(errorMsg).catch(() => {});
+      } else {
+        await interaction.reply(errorMsg).catch(() => {});
+      }
+    }
+  } else if (interaction.isButton() && interaction.customId.startsWith("translate_")) {
+    try {
+      await interaction.deferReply({ ephemeral: true });
 
-  if (interaction && !interaction.replied && !interaction.deferred) {
-    interaction.reply({ content: userMessage, flags: 64 }).catch(() => {});
+      const messageId = interaction.customId.replace("translate_", "");
+      const message = await interaction.channel.messages.fetch(messageId);
+
+      if (!message || !message.content) {
+        await interaction.editReply({
+          content: "❌ Could not find the message to translate.",
+        });
+        return;
+      }
+
+      const userLang = getUserPref(interaction.user.id);
+      if (!userLang) {
+        await interaction.editReply({
+          content: "⚠️ Please set your language first using `/setlanguage`.",
+        });
+        return;
+      }
+
+      const detection = await deeplTranslator.translateText(message.content, null, "EN-US");
+      const detectedLang = (detection.detectedSourceLang || "EN").toUpperCase();
+
+      if (languagesMatch(userLang, detectedLang)) {
+        await interaction.editReply({
+          content: `✅ This message is already in ${detectedLang}. No translation needed.`,
+        });
+        return;
+      }
+
+      const cache = loadTranslationCache();
+      const cacheKey = `${message.content}::${userLang}`;
+      let translatedText = cache[cacheKey]?.text;
+
+      if (!translatedText) {
+        const result = await deeplTranslator.translateText(
+          message.content,
+          detectedLang,
+          userLang
+        );
+        translatedText = result.text;
+        cache[cacheKey] = { text: translatedText, timestamp: Date.now() };
+        saveTranslationCache(cache);
+      }
+
+      await interaction.editReply({
+        content:
+          `🌍 **Translation** (${detectedLang} → ${userLang})\n` +
+          `**From:** ${message.author.tag}\n\n` +
+          `**Original:**\n${message.content}\n\n` +
+          `**Translation:**\n${translatedText}`
+      });
+
+    } catch (err) {
+      console.error("Button translation error:", err);
+
+      let errorMessage = "❌ Translation error occurred.";
+
+      if (err.response?.status === 456) {
+        errorMessage = "⚠️ DeepL quota exceeded. Please try again later.";
+      } else if (err.response?.status === 429) {
+        errorMessage = "⏳ Too many translation requests. Please wait a moment.";
+      } else if (err.code === "ENOTFOUND" || err.code === "ETIMEDOUT") {
+        errorMessage = "🌐 Cannot reach translation service. Please try again.";
+      }
+
+      if (interaction.deferred) {
+        await interaction.editReply({ content: errorMessage });
+      } else {
+        await interaction.reply({ content: errorMessage, ephemeral: true });
+      }
+    }
   }
-}
+});
+
+setInterval(() => {
+  try {
+    const translationCache = JSON.parse(fs.readFileSync(cacheFilePath, "utf8"));
+    const now = Date.now();
+    let modified = false;
+    for (const key in translationCache) {
+      if (now - translationCache[key].timestamp > 6 * 60 * 60 * 1000) {
+        delete translationCache[key];
+        modified = true;
+      }
+    }
+    if (modified) {
+      fs.writeFileSync(cacheFilePath, JSON.stringify(translationCache, null, 2));
+    }
+  } catch (err) {
+    console.error("Cache cleanup error:", err);
+  }
+}, 6 * 60 * 60 * 1000);
 
 client.once("clientReady", () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
-  console.log(`📋 Translation channels: ${allowedChannelIds.length > 0 ? allowedChannelIds.join(", ") : "None set"}`);
+  console.log(`📋 Commands loaded: ${client.commands.size}`);
 });
 
 client.login(process.env.DISCORD_TOKEN);

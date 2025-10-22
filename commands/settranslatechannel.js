@@ -6,7 +6,7 @@ const filePath = path.join(__dirname,'..','data','translateChannel.json');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('settranslatechannel')
-    .setDescription('Set channels where translation buttons will appear (Admin only)')
+    .setDescription('Set channels where message translation is enabled (Admin only)')
     .addChannelOption(opt => opt
       .setName('channel')
       .setDescription('Select the channel')
@@ -26,7 +26,7 @@ module.exports = {
     if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
       await interaction.reply({ 
         content: '❌ Only administrators can manage translation channels.', 
-        flags: 64 
+        ephemeral: true 
       });
       return;
     }
@@ -49,13 +49,13 @@ module.exports = {
         data.channelIds.push(channel.id);
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
         await interaction.reply({ 
-          content: `✅ Translation buttons will now appear in ${channel}`, 
-          flags: 64 
+          content: `✅ Translation enabled in ${channel}\n\nUsers can now right-click messages and select **"Translate Message"**.`, 
+          ephemeral: true 
         });
       } else {
         await interaction.reply({ 
           content: `⚠️ ${channel} is already a translation channel.`, 
-          flags: 64 
+          ephemeral: true 
         });
       }
     } else {
@@ -64,13 +64,13 @@ module.exports = {
         data.channelIds.splice(index, 1);
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
         await interaction.reply({ 
-          content: `✅ Translation buttons removed from ${channel}`, 
-          flags: 64 
+          content: `✅ Translation disabled in ${channel}`, 
+          ephemeral: true 
         });
       } else {
         await interaction.reply({ 
           content: `⚠️ ${channel} is not a translation channel.`, 
-          flags: 64 
+          ephemeral: true 
         });
       }
     }

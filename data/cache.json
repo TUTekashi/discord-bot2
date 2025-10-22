@@ -2,5 +2,9 @@
   "Der schnelle braune Fuchs springt über den faulen Hund::EN-US": {
     "text": "The quick brown fox jumps over the lazy dog",
     "timestamp": 1761140215871
+  },
+  "hola amigo::EN-US": {
+    "text": "hello friend",
+    "timestamp": 1761147299417
   }
 }

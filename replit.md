@@ -16,19 +16,19 @@ Backend service (Discord bot) - No frontend interface
 ### Core Translation
 - **25 supported languages**: Arabic, Bulgarian, Chinese, Czech, Dutch, English, Finnish, French, German, Greek, Hungarian, Italian, Japanese, Korean, Latvian, Lithuanian, Polish, Portuguese, Russian, Slovak, Slovenian, Spanish, Swedish, Turkish, Ukrainian
 - **Dual translation modes**:
-  - **Button Mode** (default): Click "🌍 Translate" button to get translations
+  - **Reaction Mode** (default): Click the 🌍 reaction emoji to get translations via DM
   - **Auto Mode**: Automatically receive translations via DM for all messages
-- **Smart language detection**: Only shows translate button when users need it
+- **Smart language detection**: Only shows 🌍 reaction when users need translation
 - **Translation caching**: Reduces API calls and improves performance
 
 ### Administration
-- **Multi-channel support**: Set multiple channels for translation buttons
+- **Multi-channel support**: Set multiple channels for translation reactions
 - **Admin-only controls**: Only administrators can manage translation channels
 - **Channel management**: Add or remove translation channels easily
 
 ### Performance & Reliability
-- **Memory optimization**: Automatic cleanup of button tracking and cache
-- **Button auto-cleanup**: Translate buttons auto-delete after 10 minutes
+- **Memory optimization**: Automatic cleanup of reaction tracking and cache
+- **Persistent reactions**: 🌍 emoji stays on messages permanently for easy access
 - **Comprehensive error handling**: Specific messages for quota limits, timeouts, and API errors
 - **Channel data caching**: Optimized file I/O for better performance
 
@@ -61,9 +61,9 @@ The following secrets must be configured in Replit Secrets (NOT in .env file):
 ## Commands
 - `/setlanguage [language] [mode]` - Set your preferred language and translation mode
   - Choose from 25 supported languages
-  - Select "button" mode (click to translate) or "auto" mode (automatic DM translations)
+  - Select "reaction" mode (click 🌍 to translate) or "auto" mode (automatic DM translations)
 - `/settranslatechannel [channel] [action]` - Manage translation channels (Admin only)
-  - Add or remove channels where translation buttons appear
+  - Add or remove channels where translation reactions appear
   - Supports multiple channels simultaneously
 
 ## Setup Instructions
@@ -72,24 +72,29 @@ The following secrets must be configured in Replit Secrets (NOT in .env file):
 3. Bot will automatically start via the workflow
 4. Use `/settranslatechannel` to designate channels for translations
 5. Users can set their language preference with `/setlanguage`
+6. **Important**: Enable "Message Content Intent" in Discord Developer Portal for the bot
 
 ## User Guide
-1. **Set your language**: `/setlanguage language:Spanish mode:button`
+1. **Set your language**: `/setlanguage language:Spanish mode:reaction`
 2. **Choose mode**:
-   - **Button mode**: Click translate button when you need it
+   - **Reaction mode**: Click 🌍 reaction emoji to get translation via DM
    - **Auto mode**: Receive automatic DM translations for all messages
-3. **Translate messages**: Click the "🌍 Translate" button on any message in designated channels
+3. **Translate messages**: Click the 🌍 reaction on any message in designated channels
 
 ## Recent Changes
+- 2025-10-22: Switched to reaction-based translation
+  - ✅ Replaced disappearing buttons with permanent 🌍 reaction emoji
+  - ✅ Translations now sent via DM for cleaner channels
+  - ✅ Reactions stay on messages permanently for easy access
+  - ✅ Added support for partial reactions (better reliability)
 - 2025-10-22: Major improvements and production-ready release
   - ✅ Added admin permission check for channel management
   - ✅ Added language validation with 25 DeepL-supported languages
-  - ✅ Fixed memory leaks (button tracking with TTL cleanup)
+  - ✅ Fixed memory leaks (reaction tracking optimization)
   - ✅ Optimized channel data caching
   - ✅ Improved error handling with specific DeepL API messages
   - ✅ Added multi-channel translation support
   - ✅ Implemented auto-translate mode with DM delivery
-  - ✅ Added button auto-cleanup (10-minute TTL)
   - ✅ Fixed language matching (EN vs EN-US now correctly matches)
   - ✅ Show detected language in translation responses
 - 2025-10-22: Initial setup in Replit environment

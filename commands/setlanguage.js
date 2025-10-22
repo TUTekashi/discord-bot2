@@ -57,10 +57,10 @@ module.exports = {
     )
     .addStringOption(option =>
       option.setName('mode')
-        .setDescription('Translation mode (default: button)')
+        .setDescription('Translation mode (default: reaction)')
         .setRequired(false)
         .addChoices(
-          { name: 'Button - Click to translate', value: 'button' },
+          { name: 'Reaction - Click 🌍 reaction to translate', value: 'button' },
           { name: 'Auto - Automatically translate all messages', value: 'auto' }
         )
     ),
@@ -81,7 +81,7 @@ module.exports = {
 
       fs.writeFileSync(filePath, JSON.stringify(users, null, 2));
 
-      const modeText = mode === 'auto' ? '(Auto-translate enabled)' : '(Click button to translate)';
+      const modeText = mode === 'auto' ? '(Auto-translate enabled - you will receive DMs)' : '(Click 🌍 reaction to translate)';
       await interaction.editReply({
         content: `✅ Your language has been set to **${langCode}** ${modeText}`,
       });

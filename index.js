@@ -4,9 +4,6 @@ const {
   GatewayIntentBits,
   Partials,
   Collection,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
 } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
@@ -17,8 +14,9 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMessageReactions,
   ],
-  partials: [Partials.Message, Partials.Channel],
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
 client.commands = new Collection();
@@ -126,16 +124,7 @@ function reloadTranslationChannels() {
 }
 reloadTranslationChannels();
 
-const buttonsAdded = new Map();
-setInterval(() => {
-  const now = Date.now();
-  const fiveMinutes = 5 * 60 * 1000;
-  for (const [messageId, timestamp] of buttonsAdded.entries()) {
-    if (now - timestamp > fiveMinutes) {
-      buttonsAdded.delete(messageId);
-    }
-  }
-}, 60 * 1000);
+const reactionsAdded = new Set();
 
 client.on("messageCreate", async (message) => {
   if (message.author?.bot) return;
@@ -143,7 +132,7 @@ client.on("messageCreate", async (message) => {
 
   if (!allowedChannelIds.includes(message.channel.id)) return;
 
-  if (buttonsAdded.has(message.id)) return;
+  if (reactionsAdded.has(message.id)) return;
 
   try {
     const users = loadUserData();
@@ -154,7 +143,7 @@ client.on("messageCreate", async (message) => {
     const detectedLang = (detection.detectedSourceLang || "EN").toUpperCase();
 
     const autoTranslateUsers = [];
-    const buttonModeUsers = [];
+    const reactionModeUsers = [];
 
     for (const id of userIds) {
       const pref = getUserPref(id);
@@ -163,7 +152,7 @@ client.on("messageCreate", async (message) => {
       if (pref.mode === "auto") {
         autoTranslateUsers.push({ userId: id, pref });
       } else {
-        buttonModeUsers.push({ userId: id, pref });
+        reactionModeUsers.push({ userId: id, pref });
       }
     }
 
@@ -199,70 +188,59 @@ client.on("messageCreate", async (message) => {
       }
     }
 
-    if (buttonModeUsers.length > 0) {
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`translate_${message.id}_${detectedLang}`)
-          .setEmoji("🌍")
-          .setLabel(`Translate (from ${detectedLang})`)
-          .setStyle(ButtonStyle.Secondary)
-      );
-
-      const buttonMessage = await message.reply({ 
-        components: [row], 
-        allowedMentions: { repliedUser: false } 
-      });
-      buttonsAdded.set(message.id, Date.now());
-
-      setTimeout(async () => {
-        try {
-          await buttonMessage.delete();
-          buttonsAdded.delete(message.id);
-        } catch (err) {
-          console.log("Button message already deleted or not found");
-        }
-      }, 10 * 60 * 1000);
+    if (reactionModeUsers.length > 0) {
+      await message.react("🌍");
+      reactionsAdded.add(message.id);
     }
   } catch (err) {
-    handleDeeplError(err, "Button add");
+    handleDeeplError(err, "Reaction add");
   }
 });
 
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isButton() || !interaction.customId.startsWith("translate_")) return;
-
-  const [_, messageId, detectedLang] = interaction.customId.split("_");
-  try {
-    const channel = interaction.channel;
-    const originalMessage = await channel.messages.fetch(messageId);
-    if (!originalMessage?.content) {
-      await interaction.reply({ content: "⚠️ Message not found.", flags: 64 });
+client.on("messageReactionAdd", async (reaction, user) => {
+  if (user.bot) return;
+  
+  if (reaction.partial) {
+    try {
+      await reaction.fetch();
+    } catch (error) {
+      console.error('Error fetching reaction:', error);
       return;
     }
+  }
 
-    const pref = getUserPref(interaction.user.id);
+  if (reaction.emoji.name !== "🌍") return;
+
+  const message = reaction.message;
+  if (!message.content) return;
+
+  if (!allowedChannelIds.includes(message.channel.id)) return;
+
+  try {
+    const pref = getUserPref(user.id);
     if (!pref?.lang) {
-      await interaction.reply({ 
-        content: "⚠️ Set your language first with `/setlanguage`.", 
-        flags: 64 
+      await user.send("⚠️ Set your language first with `/setlanguage`.").catch(() => {
+        console.log(`Cannot DM user ${user.id}`);
       });
       return;
     }
+
+    const detection = await deeplTranslator.translateText(message.content, null, "EN-US");
+    const detectedLang = (detection.detectedSourceLang || "EN").toUpperCase();
 
     if (languagesMatch(pref.lang, detectedLang)) {
-      await interaction.reply({
-        content: `✅ Message is already in ${detectedLang}. No translation needed.`,
-        flags: 64,
+      await user.send(`✅ Message is already in ${detectedLang}. No translation needed.`).catch(() => {
+        console.log(`Cannot DM user ${user.id}`);
       });
       return;
     }
 
-    const cacheKey = `${originalMessage.content}::${pref.lang}`;
+    const cacheKey = `${message.content}::${pref.lang}`;
     let translatedText = translationCache[cacheKey]?.text;
 
     if (!translatedText) {
       const result = await deeplTranslator.translateText(
-        originalMessage.content,
+        message.content,
         detectedLang,
         pref.lang
       );
@@ -271,12 +249,16 @@ client.on("interactionCreate", async (interaction) => {
       fs.writeFileSync(cacheFilePath, JSON.stringify(translationCache, null, 2));
     }
 
-    await interaction.reply({
-      content: `🌍 **Translation** (${detectedLang} → ${pref.lang}):\n${translatedText}`,
-      flags: 64,
+    await user.send(
+      `🌍 **Translation** (${detectedLang} → ${pref.lang})\n` +
+      `📍 ${message.channel.name} - ${message.author.tag}:\n\n` +
+      `**Original:** ${message.content}\n\n` +
+      `**Translation:** ${translatedText}`
+    ).catch(() => {
+      console.log(`Cannot DM user ${user.id}`);
     });
   } catch (err) {
-    handleDeeplError(err, "Button translation", interaction);
+    handleDeeplError(err, "Reaction translation");
   }
 });
 

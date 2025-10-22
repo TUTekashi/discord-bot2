@@ -45,8 +45,15 @@ The following secrets must be configured in Replit Secrets (NOT in .env file):
 - Translation cache auto-cleans every 6 hours
 - Bot requires MESSAGE_CONTENT intent to read messages
 
+## Setup Instructions
+1. Ensure all required secrets are set in Replit Secrets
+2. Run `node clear-and-deploy.js` to deploy slash commands to Discord (one-time setup)
+3. Bot will automatically start via the workflow
+
 ## Recent Changes
 - 2025-10-22: Initial setup in Replit environment
   - Created .gitignore to exclude .env and data files
   - Configured workflow to run bot as background service
   - Moved secrets from .env to Replit Secrets system
+  - Fixed deprecation warning (ready → clientReady event)
+  - Deployed slash commands to Discord server

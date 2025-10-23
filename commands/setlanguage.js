@@ -1,22 +1,5 @@
-const { SlashCommandBuilder } = require("discord.js");
-const fs = require("fs");
-const path = require("path");
-
-const filePath = path.join(__dirname, "../data/userLanguages.json");
-
-function loadUserData() {
-  try {
-    if (!fs.existsSync(filePath)) {
-      fs.writeFileSync(filePath, "{}");
-    }
-    const text = fs.readFileSync(filePath, "utf8").trim();
-    return text ? JSON.parse(text) : {};
-  } catch (err) {
-    console.error("Corrupt userLanguages.json — resetting:", err);
-    fs.writeFileSync(filePath, "{}");
-    return {};
-  }
-}
+const { SlashCommandBuilder, MessageFlags } = require("discord.js");
+const { saveUserPref } = require("../utils/userPrefs.js");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -57,15 +40,12 @@ module.exports = {
 
   async execute(interaction) {
     try {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       const langCode = interaction.options.getString('language');
       const userId = interaction.user.id;
-      const users = loadUserData();
       
-      users[userId] = langCode;
-
-      fs.writeFileSync(filePath, JSON.stringify(users, null, 2));
+      saveUserPref(userId, langCode);
 
       await interaction.editReply({
         content: `✅ Your language has been set to **${langCode}**\n\nYou can now right-click any message and select **"Translate Message"** to see translations in your language.`,

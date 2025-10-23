@@ -1,4 +1,18 @@
 require("dotenv").config();
+
+// --- Keep alive web server for Replit ---
+const express = require("express");
+const app = express();
+
+app.get("/", (req, res) => {
+  console.log("💓 Ping received to keep bot alive");
+  res.send("✅ Bot is alive and running!");
+});
+
+app.listen(3000, () => {
+  console.log("🌐 Keep-alive web server running on port 3000");
+});
+
 const {
   Client,
   GatewayIntentBits,
@@ -6,10 +20,30 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  escapeMarkdown,
+  MessageFlags,
 } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const deepl = require("deepl-node");
+const { getUserPref } = require("./utils/userPrefs.js");
+
+// --- File paths ---
+const dataDir = path.join(__dirname, "data");
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir);
+
+const channelDataPath = path.join(dataDir, "translateChannel.json");
+const cacheFilePath = path.join(dataDir, "cache.json");
+
+// Ensure cache file exists
+if (!fs.existsSync(cacheFilePath)) {
+  fs.writeFileSync(cacheFilePath, "{}");
+}
+
+// Ensure channel config exists
+if (!fs.existsSync(channelDataPath)) {
+  fs.writeFileSync(channelDataPath, JSON.stringify({ channelIds: [] }, null, 2));
+}
 
 const client = new Client({
   intents: [
@@ -33,35 +67,6 @@ if (fs.existsSync(commandsPath)) {
 }
 
 const deeplTranslator = new deepl.Translator(process.env.DEEPL_KEY);
-const userFilePath = path.join(__dirname, "./data/userLanguages.json");
-const channelDataPath = path.join(__dirname, "./data/translateChannel.json");
-const cacheFilePath = path.join(__dirname, "./data/cache.json");
-if (!fs.existsSync(cacheFilePath)) fs.writeFileSync(cacheFilePath, "{}");
-
-function loadUserData() {
-  if (!fs.existsSync(userFilePath)) fs.writeFileSync(userFilePath, "{}");
-  const text = fs.readFileSync(userFilePath, "utf8").trim();
-  return text ? JSON.parse(text) : {};
-}
-
-function getUserPref(userId) {
-  const users = loadUserData();
-  const raw = users[userId];
-  if (!raw) return null;
-  if (typeof raw === "string") {
-    return normalizeLang(raw);
-  }
-  return normalizeLang(raw.lang || raw);
-}
-
-function normalizeLang(lang) {
-  if (!lang) return "";
-  let l = lang.toUpperCase();
-  if (l === "EN") l = "EN-US";
-  if (l === "PT") l = "PT-PT";
-  if (l === "ZH") l = "ZH-HANS";
-  return l;
-}
 
 function getBaseLang(lang) {
   if (!lang) return "";
@@ -123,23 +128,32 @@ client.on("messageCreate", async (message) => {
 });
 
 client.on("interactionCreate", async (interaction) => {
-  if (interaction.isChatInputCommand() || interaction.isMessageContextMenuCommand()) {
+  if (
+    interaction.isChatInputCommand() ||
+    interaction.isMessageContextMenuCommand()
+  ) {
     const command = client.commands.get(interaction.commandName);
     if (!command) return;
     try {
       await command.execute(interaction);
     } catch (err) {
       console.error(err);
-      const errorMsg = { content: "❌ Error executing command.", ephemeral: true };
+      const errorMsg = {
+        content: "❌ Error executing command.",
+        flags: MessageFlags.Ephemeral,
+      };
       if (interaction.replied || interaction.deferred) {
-        await interaction.followUp(errorMsg).catch(() => {});
+        await interaction.followUp({ content: '...', flags: MessageFlags.Ephemeral });
       } else {
-        await interaction.reply(errorMsg).catch(() => {});
+        await interaction.reply({ content: '...', flags: MessageFlags.Ephemeral });
       }
     }
-  } else if (interaction.isButton() && interaction.customId.startsWith("translate_")) {
+  } else if (
+    interaction.isButton() &&
+    interaction.customId.startsWith("translate_")
+  ) {
     try {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       const messageId = interaction.customId.replace("translate_", "");
       const message = await interaction.channel.messages.fetch(messageId);
@@ -159,7 +173,11 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      const detection = await deeplTranslator.translateText(message.content, null, "EN-US");
+      const detection = await deeplTranslator.translateText(
+        message.content,
+        null,
+        "EN-US",
+      );
       const detectedLang = (detection.detectedSourceLang || "EN").toUpperCase();
 
       if (languagesMatch(userLang, detectedLang)) {
@@ -177,21 +195,24 @@ client.on("interactionCreate", async (interaction) => {
         const result = await deeplTranslator.translateText(
           message.content,
           detectedLang,
-          userLang
+          userLang,
         );
         translatedText = result.text;
         cache[cacheKey] = { text: translatedText, timestamp: Date.now() };
         saveTranslationCache(cache);
       }
 
+      const safeOriginal = escapeMarkdown(message.content || "");
+      const safeTranslated = escapeMarkdown(translatedText || "");
+
       await interaction.editReply({
         content:
           `🌍 **Translation** (${detectedLang} → ${userLang})\n` +
           `**From:** ${message.author.tag}\n\n` +
-          `**Original:**\n${message.content}\n\n` +
-          `**Translation:**\n${translatedText}`
+          `**Original:**\n${safeOriginal}\n\n` +
+          `**Translation:**\n${safeTranslated}`,
+        allowedMentions: { parse: [] }, // prevents @everyone, @user mentions
       });
-
     } catch (err) {
       console.error("Button translation error:", err);
 
@@ -200,7 +221,8 @@ client.on("interactionCreate", async (interaction) => {
       if (err.response?.status === 456) {
         errorMessage = "⚠️ DeepL quota exceeded. Please try again later.";
       } else if (err.response?.status === 429) {
-        errorMessage = "⏳ Too many translation requests. Please wait a moment.";
+        errorMessage =
+          "⏳ Too many translation requests. Please wait a moment.";
       } else if (err.code === "ENOTFOUND" || err.code === "ETIMEDOUT") {
         errorMessage = "🌐 Cannot reach translation service. Please try again.";
       }
@@ -208,30 +230,41 @@ client.on("interactionCreate", async (interaction) => {
       if (interaction.deferred) {
         await interaction.editReply({ content: errorMessage });
       } else {
-        await interaction.reply({ content: errorMessage, ephemeral: true });
+        await interaction.reply({
+          content: errorMessage,
+          flags: MessageFlags.Ephemeral,
+        });
       }
     }
   }
 });
 
-setInterval(() => {
-  try {
-    const translationCache = JSON.parse(fs.readFileSync(cacheFilePath, "utf8"));
-    const now = Date.now();
-    let modified = false;
-    for (const key in translationCache) {
-      if (now - translationCache[key].timestamp > 6 * 60 * 60 * 1000) {
-        delete translationCache[key];
-        modified = true;
+setInterval(
+  () => {
+    try {
+      const translationCache = JSON.parse(
+        fs.readFileSync(cacheFilePath, "utf8"),
+      );
+      const now = Date.now();
+      let modified = false;
+      for (const key in translationCache) {
+        if (now - translationCache[key].timestamp > 6 * 60 * 60 * 1000) {
+          delete translationCache[key];
+          modified = true;
+        }
       }
+      if (modified) {
+        fs.writeFileSync(
+          cacheFilePath,
+          JSON.stringify(translationCache, null, 2),
+        );
+      }
+    } catch (err) {
+      console.error("Cache cleanup error:", err);
     }
-    if (modified) {
-      fs.writeFileSync(cacheFilePath, JSON.stringify(translationCache, null, 2));
-    }
-  } catch (err) {
-    console.error("Cache cleanup error:", err);
-  }
-}, 6 * 60 * 60 * 1000);
+  },
+  6 * 60 * 60 * 1000,
+);
 
 client.once("clientReady", () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
